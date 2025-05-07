@@ -1,0 +1,12 @@
+include LICENSE
+include README.md
+include pyproject.toml
+include pytest.ini
+include requirements-dev.txt
+
+recursive-include data *.csv
+recursive-include data *.py
+recursive-include ctoken/data *.py
+recursive-include ctoken/data *.csv
+recursive-include tests *.py
+prune scrape

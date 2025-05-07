@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctoken"
+version = "1.0.0"
+description = "A lightweight library to count and estimate costs for OpenAI API tokens"
+authors = [
+    { name = "Karthik Vinayan", email = "karthik@o1x3.com" }
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.8"
+dynamic = ["classifiers", "dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/o1x3/ctoken"
+Repository = "https://github.com/o1x3/ctoken"
+Issues = "https://github.com/o1x3/ctoken/issues"
+
+[tool.setuptools]
+packages = ["ctoken", "ctoken.data"]
+
+[tool.setuptools.package-data]
+"ctoken" = ["data/*.py", "data/*.csv"]
