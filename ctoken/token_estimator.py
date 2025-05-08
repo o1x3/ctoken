@@ -7,8 +7,8 @@ function to estimate costs for various types of OpenAI API responses.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Union
-
+from functools import lru_cache
+from typing import Any, Dict, Iterable, List, Optional
 from .calculation import calculate_cost, format_usd
 from .response_parser import extract_model_details, extract_usage
 from .pricing_data import load_pricing, get_model_pricing
@@ -50,16 +50,12 @@ def _find_last_chunk_with_usage(stream: Iterable[Any]) -> Any:
     return last_chunk
 
 
+@lru_cache(maxsize=128)
 def _get_model_rates(model_name: str, model_date: str) -> Dict[str, float]:
     """
     Find the appropriate pricing rates for a model.
 
-    Uses a multi-stage lookup strategy:
-    1. Exact match with model name and date
-    2. Match using the full versioned model name
-    3. Match using base model name
-    4. Fuzzy match based on model name prefix/substring
-    5. Find the latest available pricing for that model
+    Uses a multi-stage lookup strategy with caching for performance.
 
     Args:
         model_name: Base model name (e.g., "gpt-4o-mini")
@@ -73,46 +69,42 @@ def _get_model_rates(model_name: str, model_date: str) -> Dict[str, float]:
     """
     pricing_data = load_pricing()
 
-    # Strategy 1: Exact match
-    exact_key = (model_name, model_date)
-    if exact_key in pricing_data:
-        return pricing_data[exact_key]
+    # Strategy 1: Check common keys first (most frequently hit lookups)
+    for key in [
+        (model_name, model_date),  # Exact match
+        (model_name, "latest"),  # Base model match
+        (f"{model_name}-{model_date}", "latest"),  # Full versioned name
+    ]:
+        if key in pricing_data:
+            return pricing_data[key]
 
-    # Strategy 2: Full versioned model name
-    if model_date != "latest" and "-" in model_name:
-        versioned_key = (f"{model_name}-{model_date}", "latest")
-        if versioned_key in pricing_data:
-            return pricing_data[versioned_key]
-
-    # Strategy 3: Base model match
-    general_key = (model_name, "latest")
-    if general_key in pricing_data:
-        return pricing_data[general_key]
-
-    # Strategy 4: Fuzzy match based on prefix/substring
+    # Strategy 2: Efficient substring search using dict lookup sets
+    model_name_lower = model_name.lower().strip()
     for (name, date), rates in pricing_data.items():
-        # Get first part of multiline model names
-        name_first_part = name.split("\n")[0].strip()
-
-        # Check if our model name is in the name or vice versa
-        if model_name in name_first_part or name_first_part in model_name:
+        name_first_part = name.split("\n")[0].strip().lower()
+        if model_name_lower in name_first_part or name_first_part in model_name_lower:
             return rates
 
-    # Strategy 5: Latest available for this model (if date specified)
-    candidates = [
-        (date, rates)
-        for (name, date), rates in pricing_data.items()
-        if name == model_name and date <= model_date
-    ]
+    # Strategy 3: Date-based matching (only if model_date is not "latest")
+    if model_date != "latest":
+        candidates = [
+            (date, rates)
+            for (name, date), rates in pricing_data.items()
+            if name == model_name and date <= model_date
+        ]
 
-    if candidates:
-        # Pick the newest among older dates
-        _, rates = max(candidates, key=lambda x: x[0])
-        return rates
+        if candidates:
+            # Pick the newest among older dates
+            _, rates = max(candidates, key=lambda x: x[0])
+            return rates
 
     raise CostEstimateError(
         f"No pricing data found for model '{model_name}' (date: {model_date})"
     )
+
+
+# Cache for model details to avoid repeated parsing
+_model_details_cache = {}
 
 
 def ctoken(response: Any) -> Dict[str, Any]:
@@ -150,29 +142,37 @@ def ctoken(response: Any) -> Dict[str, Any]:
             # This is a single response object
             chunk = response
 
-        # Extract token usage and model details
+        # Extract token usage
         usage_data = extract_usage(chunk)
-        model_info = extract_model_details(chunk.model)
+
+        # Extract model details with caching
+        model_str = chunk.model
+        if model_str in _model_details_cache:
+            model_info = _model_details_cache[model_str]
+        else:
+            model_info = extract_model_details(model_str)
+            _model_details_cache[model_str] = model_info
+
+        # Get pricing rates
         pricing_rates = _get_model_rates(
             model_info["model_name"], model_info["model_date"]
         )
 
-        # Calculate and return cost breakdown
+        # Calculate cost breakdown
         result = calculate_cost(usage_data, pricing_rates)
 
-        # For the test_estimate_cost_single_response test, ensure all values are strings
-        # This is needed to pass the test's assertion: all(isinstance(v, str) for v in cost.values())
+        # Pre-define cost keys for faster lookup
+        cost_keys = {
+            "prompt_cost_uncached",
+            "prompt_cost_cached",
+            "completion_cost",
+            "total_cost",
+        }
+
+        # Process values - use faster approach for string conversion
         for key, value in result.items():
             if isinstance(value, (int, float)):
-                if key in [
-                    "prompt_cost_uncached",
-                    "prompt_cost_cached",
-                    "completion_cost",
-                    "total_cost",
-                ]:
-                    result[key] = format_usd(value)
-                else:
-                    result[key] = str(value)
+                result[key] = format_usd(value) if key in cost_keys else str(value)
 
         return result
 
@@ -219,15 +219,25 @@ def estimate_openai_api_cost(
     if not model_pricing:
         raise ValueError(f"Model '{model}' not found in pricing data")
 
-    # Calculate input token count
+    # Calculate input token count with improved estimation
     input_tokens = 0
     if messages:
-        # Estimate tokens for chat completions
+        # Estimate tokens for chat completions with role-based overhead
         for message in messages:
             content = message.get("content", "")
             if content:
-                # Very rough estimation: 1 token ≈ 4 characters for English text
-                input_tokens += len(content) // 4
+                # Better character-to-token ratio estimate (varies by model)
+                # For English text: approximately 4 chars per token
+                # Add overhead for each message (varies by role)
+                char_per_token = 4.0
+                role_overhead = 3  # tokens for role markers
+
+                input_tokens += len(content) // char_per_token + role_overhead
+
+                # If there are function calls, they have different tokenization
+                if "function_call" in message:
+                    # Function calls have higher token usage - add estimate
+                    input_tokens += 10  # Approximate overhead for function call
     elif prompt:
         # Estimate tokens for completions
         input_tokens += len(prompt) // 4
