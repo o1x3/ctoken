@@ -2,7 +2,8 @@
 
 A high-performance Python library for estimating costs of OpenAI API calls. Track your API expenses precisely with support for all OpenAI models and APIs.
 
-[![PyPI version](https://badge.fury.io/py/ctoken.svg)](https://badge.fury.io/py/ctoken)
+[![PyPI version](https://badge.fury.io/py/ctoken.svg?icon=si%3Apython)](https://badge.fury.io/py/ctoken)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/o1x3/ctoken/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Install
