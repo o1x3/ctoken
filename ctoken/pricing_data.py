@@ -6,6 +6,7 @@ It is updated by external scripts as needed.
 """
 
 from typing import Dict, Tuple, Optional, List, Any
+import re
 
 # Import the static pricing data
 from ctoken.data.pricing_data import PRICING_DATA
@@ -51,18 +52,35 @@ def get_model_pricing(model_name: str) -> Optional[Dict[str, Any]]:
         Dictionary with pricing information or None if model not found
     """
     # Normalize model name
+    if not isinstance(model_name, str):
+        model_name = str(model_name)
+
     model_name = model_name.lower().strip()
+    base_model_name = model_name
+    version = None
+
+    # Handle versioned models (e.g., gpt-4.5-preview-2025-02-27)
+    date_pattern = r"-(\d{4}-\d{2}-\d{2})$"
+    date_match = re.search(date_pattern, model_name)
+    if date_match:
+        version = date_match.group(1)
+        base_model_name = re.sub(date_pattern, "", model_name)
 
     # Get all pricing data
     pricing_data = get_all_model_pricings()
 
-    # Direct match
+    # Direct match with base model name
     for pricing in pricing_data:
-        if pricing["model"].lower() == model_name:
-            return pricing
+        if pricing["model"].lower() == base_model_name:
+            # For test compatibility, set the model to base model name
+            result = pricing.copy()
+            result["model"] = base_model_name
+            if version:
+                result["version"] = version
+            return result
 
     # Handle versioned models (like gpt-4-0125-preview)
-    if "-" in model_name:
+    if "-" in model_name and not version:
         parts = model_name.split("-")
         if len(parts) >= 3:
             base_model = "-".join(parts[:2])  # e.g., "gpt-4"
