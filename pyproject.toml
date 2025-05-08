@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ctoken"
-version = "1.0.2"
+version = "1.0.3"
 description = "A lightweight library to count and estimate costs for OpenAI API tokens"
 authors = [
     { name = "Karthik Vinayan", email = "karthik@o1x3.com" }
