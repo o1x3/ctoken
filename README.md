@@ -13,16 +13,16 @@ pip install ctoken
 
 ## Features
 
-- 💰 **Accurate cost estimation** for all OpenAI models
-- 🔄 **Compatible with all OpenAI APIs** (Chat Completions and Responses)
-- 📊 **Detailed cost breakdown** (prompt, completion, cached tokens)
-- 🚀 **Works with streaming responses**
-- 📅 **External pricing data** with no hardcoded values
-- 🔄 **Dynamic data refresh** from remote sources
-- 🧪 **Mock response support** for testing
-- ⚡ **High-performance token counting** with efficient caching
-- 🔍 **Smart model detection** for accurate pricing
-- 🛡️ **Robust error handling** through unified exception type
+- Accurate cost estimation for all OpenAI models
+- Compatible with all OpenAI APIs (Chat Completions and Responses)
+- Detailed cost breakdown (prompt, completion, cached tokens)
+- Works with streaming responses
+- External pricing data with no hardcoded values
+- Dynamic data refresh from remote sources
+- Mock response support for testing
+- High-performance token counting with efficient caching
+- Smart model detection for accurate pricing
+- Robust error handling through unified exception type
 
 ## Quick Start
 
@@ -139,7 +139,7 @@ for question in questions:
     
     # Accumulate costs
     cost_estimate = ctoken(resp)
-    total_cost += cost_estimate['total_cost']  # Cost is already a float value
+    total_cost += cost_estimate['total_cost']
 
 # Create a report
 df = pd.DataFrame([{
@@ -163,7 +163,7 @@ refresh_pricing()
 
 ### 6. Pricing Data Sources
 
-The library contains pricing data in a bundled Python dictionary format for optimal performance. It also supports fetching pricing from:
+The library contains pricing data in a bundled Python dictionary format. It also supports fetching pricing from:
 
 1. Local file: `data/gpt_pricing_data.csv` if available
 2. Remote source: Official GitHub repository
@@ -199,7 +199,7 @@ ctoken(response) → dict[str, Any]
         total_tokens         : int   # Total tokens used
         cached_tokens        : int   # Number of cached tokens
         prompt_cost_uncached : float # Cost of non-cached prompt tokens
-        prompt_cost_cached   : float # Cost of cached prompt tokens (often reduced rate)  
+        prompt_cost_cached  : float # Cost of cached prompt tokens (often reduced rate)
         completion_cost      : float # Cost of model-generated tokens
         total_cost           : float # Total cost of the API call
     """
@@ -249,7 +249,7 @@ def ask_ai():
     # Log the cost with user ID
     result = ctoken(response)
     cost_logger.info(
-        f"User: {user_id} | Query: {user_query[:30]}... | " 
+        f"User: {user_id} | Query: {user_query[:30]}... | "
         f"Tokens: {result['total_tokens']} | Cost: ${result['total_cost']}"
     )
     
@@ -297,7 +297,7 @@ def make_api_call(query):
     
     # Calculate and add to spending
     cost = ctoken(response)
-    spent_today += cost['total_cost']  # Cost is already a float value
+    spent_today += cost['total_cost']
     
     return {
         "response": response.choices[0].message.content,
@@ -310,12 +310,12 @@ def make_api_call(query):
 
 This library has been optimized for performance with:
 
-- **Efficient caching** of pricing data
-- **Improved error handling** with detailed messages
-- **Smart model name parsing** for versioned models
-- **Optimized token calculations** using Python's Decimal for financial accuracy
-- **Reduced memory usage** with streamlined data structures
-- **Enhanced attribute access** for safe navigation of nested objects
+- Efficient caching of pricing data
+- Improved error handling with detailed messages
+- Smart model name parsing for versioned models
+- Optimized token calculations using Python's Decimal for financial accuracy
+- Reduced memory usage with streamlined data structures
+- Enhanced attribute access for safe navigation of nested objects
 
 ## License
 

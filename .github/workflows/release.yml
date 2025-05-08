@@ -1,0 +1,175 @@
+name: Release on Version Change
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'pyproject.toml'  # Only run when pyproject.toml changes
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.final_check.outputs.should_release }}
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      
+      - name: Install dependencies
+        run: pip install tomli semver
+      
+      - name: Check if version changed
+        id: version_check
+        run: |
+          # Create a robust version checker
+          cat > check_version.py << 'EOF'
+          import tomli
+          import sys
+          import os
+          import semver
+          
+          def get_version(file_path):
+              try:
+                  with open(file_path, "rb") as f:
+                      data = tomli.loads(f.read().decode('utf-8'))
+                  
+                  # Try different common locations for version
+                  if "version" in data:
+                      return data["version"]
+                  elif "project" in data and "version" in data["project"]:
+                      return data["project"]["version"]
+                  elif "tool" in data and "poetry" in data["tool"] and "version" in data["tool"]["poetry"]:
+                      return data["tool"]["poetry"]["version"]
+                  return None
+              except Exception as e:
+                  print(f"Error parsing TOML in {file_path}: {e}", file=sys.stderr)
+                  return None
+          
+          # Get current version
+          current_version = get_version("pyproject.toml")
+          print(f"Current version: {current_version}")
+          
+          # Check if old file exists
+          if os.path.exists("old_pyproject.toml"):
+              old_version = get_version("old_pyproject.toml")
+              print(f"Previous version: {old_version}")
+              
+              if old_version is None:
+                  print("Could not determine previous version")
+                  print("::set-output name=changed::true")
+              elif current_version is None:
+                  print("Could not determine current version")
+                  print("::set-output name=changed::false")
+              elif old_version != current_version:
+                  print("Version changed!")
+                  try:
+                      if semver.compare(current_version, old_version) > 0:
+                          print("Version properly incremented")
+                      else:
+                          print("WARNING: Version not incremented or downgraded!")
+                  except:
+                      print("Could not compare versions semantically")
+                  print("::set-output name=changed::true")
+              else:
+                  print("No version change detected")
+                  print("::set-output name=changed::false")
+          else:
+              print("No previous version found, assuming first release")
+              print("::set-output name=changed::true")
+          EOF
+          
+          # Try to get the previous version of pyproject.toml
+          if git cat-file -e ${{ github.event.before }}:pyproject.toml 2>/dev/null; then
+            git show ${{ github.event.before }}:pyproject.toml > old_pyproject.toml
+          else
+            echo "No previous pyproject.toml found"
+          fi
+          
+          # Run the check
+          python check_version.py
+      
+      - name: Check if version exists on PyPI
+        id: pypi_check
+        if: steps.version_check.outputs.changed == 'true'
+        run: |
+          PACKAGE=$(python -c "import tomli; print(tomli.loads(open('pyproject.toml', 'rb').read())['project']['name'])")
+          VERSION=$(python -c "import tomli; print(tomli.loads(open('pyproject.toml', 'rb').read())['project']['version'])")
+          
+          echo "Package: $PACKAGE"
+          echo "Version: $VERSION"
+          
+          # Try to fetch the version from PyPI
+          if pip index versions $PACKAGE 2>/dev/null | grep -q "$VERSION"; then
+            echo "Version $VERSION already exists on PyPI"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version $VERSION not found on PyPI"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Final release decision
+        id: final_check
+        run: |
+          if [ "${{ steps.version_check.outputs.changed }}" != "true" ]; then
+            echo "No version change detected"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.pypi_check.outputs.exists }}" == "true" ]; then
+            echo "Version already exists on PyPI"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version detected and not on PyPI"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+  release-build:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: build release distributions
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+  pypi-publish:
+    runs-on: ubuntu-latest
+    needs:
+      - check-version
+      - release-build
+    if: needs.check-version.outputs.should_release == 'true'
+    permissions:
+      id-token: write
+    environment: prod
+    steps:
+      - name: Retrieve release distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+      - name: Publish release distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1.12
