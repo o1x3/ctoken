@@ -67,7 +67,7 @@ jobs:
               
               if old_version is None:
                   print("Could not determine previous version")
-                  print("::set-output name=changed::true")
+                  print("changed=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
               elif current_version is None:
                   print("Could not determine current version")
                   print("::set-output name=changed::false")
@@ -80,13 +80,15 @@ jobs:
                           print("WARNING: Version not incremented or downgraded!")
                   except:
                       print("Could not compare versions semantically")
-                  print("::set-output name=changed::true")
+                  print("changed=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
+
               else:
                   print("No version change detected")
                   print("::set-output name=changed::false")
           else:
               print("No previous version found, assuming first release")
-              print("::set-output name=changed::true")
+              print("changed=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
+
           EOF
           
           # Try to get the previous version of pyproject.toml
@@ -103,8 +105,8 @@ jobs:
         id: pypi_check
         if: steps.version_check.outputs.changed == 'true'
         run: |
-          PACKAGE=$(python -c "import tomli; print(tomli.loads(open('pyproject.toml', 'rb').read())['project']['name'])")
-          VERSION=$(python -c "import tomli; print(tomli.loads(open('pyproject.toml', 'rb').read())['project']['version'])")
+          PACKAGE=$(python -c "import tomli; with open('pyproject.toml', 'rb') as f: data = tomli.loads(f.read()); print(data['project']['name'])")
+          VERSION=$(python -c "import tomli; with open('pyproject.toml', 'rb') as f: data = tomli.loads(f.read()); print(data['project']['version'])")
           
           echo "Package: $PACKAGE"
           echo "Version: $VERSION"
@@ -117,6 +119,7 @@ jobs:
             echo "Version $VERSION not found on PyPI"
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
+
       
       - name: Final release decision
         id: final_check
