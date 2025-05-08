@@ -1,140 +1,93 @@
 name: Release on Version Change
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
-
 on:
   push:
     branches:
       - main
-    paths:
-      - 'pyproject.toml'  # Only run when pyproject.toml changes
-      - '.github/workflows/**'  # This will trigger on any workflow file changes
 
 jobs:
   check-version:
     runs-on: ubuntu-latest
     outputs:
-      should_release: ${{ steps.final_check.outputs.should_release }}
+      should_release: ${{ steps.pypi_check.outputs.should_release }}
     
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
       
       - name: Install dependencies
-        run: pip install tomli semver
+        run: pip install tomli requests
       
-      - name: Check if version changed
-        id: version_check
+      - name: Check if version differs from PyPI
+        id: pypi_check
         run: |
-          # Create a robust version checker
-          cat > check_version.py << 'EOF'
+          # Extract package name and version from pyproject.toml
+          cat > check_pypi.py << 'EOF'
           import tomli
+          import requests
           import sys
           import os
-          import semver
           
-          def get_version(file_path):
+          def get_package_info():
               try:
-                  with open(file_path, "rb") as f:
+                  with open("pyproject.toml", "rb") as f:
                       data = tomli.loads(f.read().decode('utf-8'))
                   
-                  # Try different common locations for version
-                  if "version" in data:
-                      return data["version"]
-                  elif "project" in data and "version" in data["project"]:
-                      return data["project"]["version"]
-                  elif "tool" in data and "poetry" in data["tool"] and "version" in data["tool"]["poetry"]:
-                      return data["tool"]["poetry"]["version"]
-                  return None
+                  # Try different common locations for package name and version
+                  if "project" in data and "name" in data["project"] and "version" in data["project"]:
+                      return data["project"]["name"], data["project"]["version"]
+                  elif "tool" in data and "poetry" in data["tool"]:
+                      poetry_data = data["tool"]["poetry"]
+                      if "name" in poetry_data and "version" in poetry_data:
+                          return poetry_data["name"], poetry_data["version"]
+                  
+                  # If we can't find both name and version in standard locations
+                  print("Could not find package name and version in pyproject.toml")
+                  return None, None
               except Exception as e:
-                  print(f"Error parsing TOML in {file_path}: {e}", file=sys.stderr)
-                  return None
+                  print(f"Error parsing pyproject.toml: {e}", file=sys.stderr)
+                  return None, None
           
-          # Get current version
-          current_version = get_version("pyproject.toml")
+          # Get package info
+          package_name, current_version = get_package_info()
+          if not package_name or not current_version:
+              print("Failed to extract package info")
+              print("should_release=false", file=open(os.environ["GITHUB_OUTPUT"], "a"))
+              sys.exit(1)
+          
+          print(f"Package: {package_name}")
           print(f"Current version: {current_version}")
           
-          # Check if old file exists
-          if os.path.exists("old_pyproject.toml"):
-              old_version = get_version("old_pyproject.toml")
-              print(f"Previous version: {old_version}")
-              
-              if old_version is None:
-                  print("Could not determine previous version")
-                  print("changed=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
-              elif current_version is None:
-                  print("Could not determine current version")
-                  print("::set-output name=changed::false")
-              elif old_version != current_version:
-                  print("Version changed!")
-                  try:
-                      if semver.compare(current_version, old_version) > 0:
-                          print("Version properly incremented")
-                      else:
-                          print("WARNING: Version not incremented or downgraded!")
-                  except:
-                      print("Could not compare versions semantically")
-                  print("changed=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
-
+          # Check PyPI for the latest version
+          try:
+              response = requests.get(f"https://pypi.org/pypi/{package_name}/json")
+              if response.status_code == 200:
+                  pypi_data = response.json()
+                  pypi_version = pypi_data["info"]["version"]
+                  print(f"PyPI version: {pypi_version}")
+                  
+                  if current_version != pypi_version:
+                      print(f"Version differs from PyPI. Local: {current_version}, PyPI: {pypi_version}")
+                      print("should_release=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
+                  else:
+                      print("Version already matches PyPI version")
+                      print("should_release=false", file=open(os.environ["GITHUB_OUTPUT"], "a"))
+              elif response.status_code == 404:
+                  print("Package not found on PyPI, this is a new package")
+                  print("should_release=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
               else:
-                  print("No version change detected")
-                  print("::set-output name=changed::false")
-          else:
-              print("No previous version found, assuming first release")
-              print("changed=true", file=open(os.environ["GITHUB_OUTPUT"], "a"))
-
+                  print(f"Error checking PyPI: {response.status_code}")
+                  print("should_release=false", file=open(os.environ["GITHUB_OUTPUT"], "a"))
+          except Exception as e:
+              print(f"Error connecting to PyPI: {e}")
+              print("should_release=false", file=open(os.environ["GITHUB_OUTPUT"], "a"))
           EOF
           
-          # Try to get the previous version of pyproject.toml
-          if git cat-file -e ${{ github.event.before }}:pyproject.toml 2>/dev/null; then
-            git show ${{ github.event.before }}:pyproject.toml > old_pyproject.toml
-          else
-            echo "No previous pyproject.toml found"
-          fi
-          
           # Run the check
-          python check_version.py
-      
-      - name: Check if version exists on PyPI
-        id: pypi_check
-        if: steps.version_check.outputs.changed == 'true'
-        run: |
-          PACKAGE=$(python -c "import tomli; with open('pyproject.toml', 'rb') as f: data = tomli.loads(f.read()); print(data['project']['name'])")
-          VERSION=$(python -c "import tomli; with open('pyproject.toml', 'rb') as f: data = tomli.loads(f.read()); print(data['project']['version'])")
-          
-          echo "Package: $PACKAGE"
-          echo "Version: $VERSION"
-          
-          # Try to fetch the version from PyPI
-          if pip index versions $PACKAGE 2>/dev/null | grep -q "$VERSION"; then
-            echo "Version $VERSION already exists on PyPI"
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Version $VERSION not found on PyPI"
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      
-      - name: Final release decision
-        id: final_check
-        run: |
-          if [ "${{ steps.version_check.outputs.changed }}" != "true" ]; then
-            echo "No version change detected"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-          elif [ "${{ steps.pypi_check.outputs.exists }}" == "true" ]; then
-            echo "Version already exists on PyPI"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-          else
-            echo "New version detected and not on PyPI"
-            echo "should_release=true" >> $GITHUB_OUTPUT
-          fi
+          python check_pypi.py
 
   release-build:
     needs: check-version
