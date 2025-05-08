@@ -19,7 +19,10 @@ from .response_parser import extract_model_details
 from .calculation import calculate_cost
 from .token_estimator import estimate_openai_api_cost as estimate_api_cost
 
-__version__ = "1.0.0"
+# Create alias for the main function
+ctoken = estimate_api_cost
+
+__version__ = "1.0.2"
 
 __all__ = [
     "calculate_cost",
@@ -29,4 +32,5 @@ __all__ = [
     "get_all_model_pricings",
     "load_pricing",
     "refresh_pricing",
+    "ctoken",
 ]
