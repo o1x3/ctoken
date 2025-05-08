@@ -10,6 +10,7 @@ on:
       - main
     paths:
       - 'pyproject.toml'  # Only run when pyproject.toml changes
+      - '.github/workflows/**'  # This will trigger on any workflow file changes
 
 jobs:
   check-version:
