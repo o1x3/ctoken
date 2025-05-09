@@ -160,19 +160,15 @@ def ctoken(response: Any) -> Dict[str, Any]:
         # Calculate and return cost breakdown
         result = calculate_cost(usage_data, pricing_rates)
 
-        # For the test_estimate_cost_single_response test, ensure all values are strings
-        # This is needed to pass the test's assertion: all(isinstance(v, str) for v in cost.values())
+        # Only format cost values as strings, keeping token counts as numbers
         for key, value in result.items():
-            if isinstance(value, (int, float)):
-                if key in [
-                    "prompt_cost_uncached",
-                    "prompt_cost_cached",
-                    "completion_cost",
-                    "total_cost",
-                ]:
-                    result[key] = format_usd(value)
-                else:
-                    result[key] = str(value)
+            if isinstance(value, (int, float)) and key in [
+                "prompt_cost_uncached",
+                "prompt_cost_cached",
+                "completion_cost",
+                "total_cost",
+            ]:
+                result[key] = format_usd(value)
 
         return result
 
@@ -249,10 +245,10 @@ def estimate_openai_api_cost(
 
         # Format the result like the ctoken function
         result = {
-            "prompt_tokens": str(prompt_tokens),
-            "completion_tokens": str(completion_tokens),
-            "total_tokens": str(total_tokens),
-            "cached_tokens": str(cached_tokens),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cached_tokens": cached_tokens,
             "prompt_cost_uncached": format_usd(prompt_cost_uncached),
             "prompt_cost_cached": format_usd(prompt_cost_cached),
             "completion_cost": format_usd(completion_cost),

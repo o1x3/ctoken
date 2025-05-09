@@ -136,8 +136,22 @@ def test_extract_usage_classic_and_new():
 def test_estimate_cost_single_response():
     resp = _classic_response(1_000, 500, 100)
     cost = ctoken(resp)
-    # Quick sanity: strings, not floats & total sum matches parts
-    assert all(isinstance(v, str) for v in cost.values())
+    # Check that token counts are numbers, but cost values are strings
+    for key, value in cost.items():
+        if key in [
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "cached_tokens",
+        ]:
+            assert isinstance(value, int), (
+                f"Expected {key} to be an int, got {type(value)}"
+            )
+        else:
+            assert isinstance(value, str), (
+                f"Expected {key} to be a string, got {type(value)}"
+            )
+
     total = sum(
         map(
             float,
