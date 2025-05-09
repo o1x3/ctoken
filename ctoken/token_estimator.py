@@ -160,16 +160,7 @@ def ctoken(response: Any) -> Dict[str, Any]:
         # Calculate and return cost breakdown
         result = calculate_cost(usage_data, pricing_rates)
 
-        # Only format cost values as strings, keeping token counts as numbers
-        for key, value in result.items():
-            if isinstance(value, (int, float)) and key in [
-                "prompt_cost_uncached",
-                "prompt_cost_cached",
-                "completion_cost",
-                "total_cost",
-            ]:
-                result[key] = format_usd(value)
-
+        # Remove the string formatting for cost values, keep them as numbers
         return result
 
     except Exception as e:
@@ -249,10 +240,10 @@ def estimate_openai_api_cost(
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
             "cached_tokens": cached_tokens,
-            "prompt_cost_uncached": format_usd(prompt_cost_uncached),
-            "prompt_cost_cached": format_usd(prompt_cost_cached),
-            "completion_cost": format_usd(completion_cost),
-            "total_cost": format_usd(total_cost),
+            "prompt_cost_uncached": prompt_cost_uncached,
+            "prompt_cost_cached": prompt_cost_cached,
+            "completion_cost": completion_cost,
+            "total_cost": total_cost,
         }
 
         return result

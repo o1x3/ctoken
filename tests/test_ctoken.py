@@ -94,10 +94,10 @@ def test_calculate_cost_basic_rounding():
     costs = calculate_cost(usage, rates)
 
     assert costs == {
-        "prompt_cost_uncached": "0.00080000",  # 800 / 1M * $1
-        "prompt_cost_cached": "0.00010000",  # 200 / 1M * $0.5
-        "completion_cost": "0.00400000",  # 2 000 / 1M * $2
-        "total_cost": "0.00490000",
+        "prompt_cost_uncached": 0.0008,  # 800 / 1M * $1
+        "prompt_cost_cached": 0.0001,  # 200 / 1M * $0.5
+        "completion_cost": 0.004,  # 2 000 / 1M * $2
+        "total_cost": 0.0049,
     }
 
 
@@ -136,7 +136,7 @@ def test_extract_usage_classic_and_new():
 def test_estimate_cost_single_response():
     resp = _classic_response(1_000, 500, 100)
     cost = ctoken(resp)
-    # Check that token counts are numbers, but cost values are strings
+    # Check that all values are numbers
     for key, value in cost.items():
         if key in [
             "prompt_tokens",
@@ -148,21 +148,16 @@ def test_estimate_cost_single_response():
                 f"Expected {key} to be an int, got {type(value)}"
             )
         else:
-            assert isinstance(value, str), (
-                f"Expected {key} to be a string, got {type(value)}"
+            assert isinstance(value, float), (
+                f"Expected {key} to be a float, got {type(value)}"
             )
 
-    total = sum(
-        map(
-            float,
-            (
-                cost["prompt_cost_uncached"],
-                cost["prompt_cost_cached"],
-                cost["completion_cost"],
-            ),
-        )
+    total = (
+        cost["prompt_cost_uncached"]
+        + cost["prompt_cost_cached"]
+        + cost["completion_cost"]
     )
-    assert float(cost["total_cost"]) == pytest.approx(total)
+    assert cost["total_cost"] == pytest.approx(total)
 
 
 def test_estimate_cost_stream(monkeypatch):

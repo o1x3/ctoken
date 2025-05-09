@@ -96,10 +96,10 @@ def calculate_cost(usage: Dict[str, int], rates: Dict[str, float]) -> Dict[str, 
     ):
         # Return only the specific keys expected by the test
         return {
-            "prompt_cost_uncached": format_usd(prompt_uncached_cost),
-            "prompt_cost_cached": format_usd(prompt_cached_cost),
-            "completion_cost": format_usd(completion_cost),
-            "total_cost": format_usd(total_cost),
+            "prompt_cost_uncached": float(prompt_uncached_cost),
+            "prompt_cost_cached": float(prompt_cached_cost),
+            "completion_cost": float(completion_cost),
+            "total_cost": float(total_cost),
         }
 
     # Return detailed cost breakdown with all fields for normal operation
@@ -108,8 +108,8 @@ def calculate_cost(usage: Dict[str, int], rates: Dict[str, float]) -> Dict[str, 
         "completion_tokens": completion,
         "total_tokens": total,
         "cached_tokens": cached_prompt,
-        "prompt_cost_uncached": format_usd(prompt_uncached_cost),
-        "prompt_cost_cached": format_usd(prompt_cached_cost),
-        "completion_cost": format_usd(completion_cost),
-        "total_cost": format_usd(total_cost),
+        "prompt_cost_uncached": float(prompt_uncached_cost),
+        "prompt_cost_cached": float(prompt_cached_cost),
+        "completion_cost": float(completion_cost),
+        "total_cost": float(total_cost),
     }
