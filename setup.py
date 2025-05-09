@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="ctoken",
-    version="1.0.3",
+    version="1.0.4",
     description="A high-performance library to count and estimate costs for OpenAI API tokens",
     author="Karthik Vinayan",
     author_email="karthik@o1x3.com",
