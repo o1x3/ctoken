@@ -22,7 +22,7 @@ from .token_estimator import estimate_openai_api_cost as estimate_api_cost
 # Create alias for the main function
 ctoken = estimate_api_cost
 
-__version__ = "1.0.5"
+__version__ = "1.1.0"
 
 __all__ = [
     "calculate_cost",
