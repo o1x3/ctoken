@@ -1,142 +1,254 @@
-from undetected_chromedriver import Chrome, ChromeOptions
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import pandas as pd
-import time
+#!/usr/bin/env python3
+"""
+OpenAI Pricing Scraper
+
+Scrapes pricing data from https://platform.openai.com/docs/pricing
+by clicking the "Copy page" button and parsing the markdown content.
+
+Updates:
+- data/openai_text_tokens_pricing.csv
+- ctoken/data/pricing_data.py
+
+Usage:
+    python scripts/openai_pricing_scraper.py
+"""
+
+import logging
 import os
+import re
+import sys
+import time
+from pathlib import Path
+
+import pandas as pd
+import pyperclip
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
+# Constants
+PRICING_URL = "https://platform.openai.com/docs/pricing?latest-pricing=standard"
+
+# Output paths
+PACKAGE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA_DIR = PACKAGE_DIR / "data"
+PRICING_CSV_PATH = DATA_DIR / "openai_text_tokens_pricing.csv"
+PRICING_PY_PATH = PACKAGE_DIR / "ctoken" / "data" / "pricing_data.py"
+RAW_MD_PATH = DATA_DIR / "openai_pricing_raw.md"
 
 
-# Permanent fix for OSError: [WinError 6]
-def patch_undetected_chromedriver():
-    import undetected_chromedriver as uc
-
-    original_del = uc.Chrome.__del__
-
-    def patched_del(self):
-        try:
-            if self.service.process:
-                self.quit()
-        except Exception as e:
-            print(f"Error: {str(e)}")
-        finally:
-            original_del(self)
-
-    uc.Chrome.__del__ = patched_del
+def parse_price(price_str: str) -> float:
+    """Parse a price string like '$1.25' into a float."""
+    if not price_str or price_str.strip() == "-":
+        return 0.0
+    clean = "".join(c for c in price_str if c.isdigit() or c == ".")
+    try:
+        return float(clean)
+    except ValueError:
+        return 0.0
 
 
-patch_undetected_chromedriver()
+def parse_markdown_table(markdown: str, section_name: str, tier: str = "Standard") -> list[dict]:
+    """
+    Parse a markdown table from the pricing page content.
+
+    Args:
+        markdown: Full markdown content
+        section_name: Section header (e.g., "Text tokens", "Image tokens")
+        tier: Pricing tier to extract (default: "Standard")
+
+    Returns:
+        List of dictionaries with model pricing data
+    """
+    data = []
+
+    # Pattern to find the section and tier table
+    # Format: ### \n\nText tokens ... Standard\n\n|header|...\n|---|...\n|row|...
+    pattern = rf"{section_name}.*?{tier}\n\n\|([^\n]+)\|\n\|[-|\s]+\|\n((?:\|[^\n]+\|\n?)+)"
+    match = re.search(pattern, markdown, re.DOTALL)
+
+    if not match:
+        logger.warning(f"Could not find {section_name} {tier} table")
+        return data
+
+    headers_line = match.group(1)
+    rows_block = match.group(2)
+
+    # Parse headers
+    headers = [h.strip() for h in headers_line.split("|") if h.strip()]
+    logger.info(f"Headers: {headers}")
+
+    # Parse rows
+    for line in rows_block.strip().split("\n"):
+        if not line.strip():
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        cells = [c for c in cells if c]  # Remove empty strings
+
+        if len(cells) >= len(headers):
+            row = {headers[i]: cells[i] for i in range(len(headers))}
+            data.append(row)
+
+    logger.info(f"Parsed {len(data)} rows from {section_name} {tier}")
+    return data
 
 
-def get_openai_pricing():
-    CHROME_PATH = r"C:\Users\imkvi\Downloads\chrome-win64\chrome.exe"
-    CHROMEDRIVER_PATH = r"C:\Users\imkvi\Downloads\chromedriver-win64\chromedriver.exe"
+def save_csv(data: list[dict], path: Path) -> None:
+    """Save pricing data to CSV file."""
+    if not data:
+        logger.error("No data to save to CSV")
+        return
 
-    # Configure browser with explicit cleanup
-    options = ChromeOptions()
-    options.binary_location = CHROME_PATH
+    # Add Version column
+    for row in data:
+        row.setdefault("Version", "")
+
+    df = pd.DataFrame(data)
+
+    # Ensure consistent column order
+    cols = ["Model", "Version", "Input", "Cached input", "Output"]
+    df = df[[c for c in cols if c in df.columns]]
+
+    os.makedirs(path.parent, exist_ok=True)
+    df.to_csv(path, index=False)
+    logger.info(f"Saved {len(data)} models to {path}")
+
+    print("\n--- Pricing Data ---")
+    print(df.to_string(index=False))
+
+
+def save_python_dict(data: list[dict], path: Path) -> None:
+    """Generate Python pricing dictionary file."""
+    if not data:
+        logger.error("No data to save to Python dict")
+        return
+
+    entries = []
+    for row in data:
+        model = row.get("Model", "")
+        version = row.get("Version", "") or "latest"
+        input_price = parse_price(row.get("Input", "0"))
+        cached_price = parse_price(row.get("Cached input", "0"))
+        output_price = parse_price(row.get("Output", "0"))
+
+        entry = f'''    ("{model}", "{version}"): {{
+        "input_price": {input_price:.4f},
+        "cached_input_price": {cached_price:.4f},
+        "output_price": {output_price:.4f},
+    }},'''
+        entries.append(entry)
+
+    content = f'''"""
+Pricing data for OpenAI models.
+
+This module contains the pricing data for OpenAI models in dictionary format.
+Auto-generated by openai_pricing_scraper.py
+Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}
+"""
+
+# Pricing data in dollars per 1M tokens (input/cached_input/output)
+PRICING_DATA = {{
+    # Format: (model_name, version): {{"input_price": float, "cached_input_price": float, "output_price": float}}
+{chr(10).join(entries)}
+}}
+'''
+
+    os.makedirs(path.parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    logger.info(f"Updated Python dictionary at {path}")
+
+
+def scrape_pricing() -> str | None:
+    """
+    Open browser, navigate to pricing page, click Copy button, return clipboard content.
+
+    Returns:
+        Markdown content from clipboard, or None on failure
+    """
+    options = Options()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
 
-    with Chrome(driver_executable_path=CHROMEDRIVER_PATH, options=options) as driver:
-        try:
-            driver.get("https://platform.openai.com/pricing")
+    logger.info("Launching Chrome...")
+    driver = webdriver.Chrome(options=options)
 
-            # Handle Cloudflare
-            try:
-                WebDriverWait(driver, 30).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
-                )
-            except Exception as e:
-                print(f"Error: {str(e)}")
-                input("Solve CAPTCHA then press Enter...")
-                time.sleep(3)
+    try:
+        logger.info(f"Navigating to {PRICING_URL}")
+        driver.get(PRICING_URL)
+        time.sleep(5)
 
-            # Wait for page to fully load
-            time.sleep(2)
+        logger.info(f"Page: {driver.title}")
 
-            # Find and click the "All snapshots" expand button
-            try:
-                expand_button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable(
-                        (By.XPATH, "//button[contains(., 'All snapshots')]")
-                    )
-                )
-                expand_button.click()
-                # Wait for expanded content to load
-                time.sleep(2)
-            except Exception as e:
-                print(f"Could not click expand button: {str(e)}")
+        # Click "Copy page" button
+        logger.info("Clicking 'Copy page' button...")
+        button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Copy page')]"))
+        )
+        button.click()
+        time.sleep(2)
 
-            # Get only the first table (Text tokens)
-            tables = driver.find_elements(By.CSS_SELECTOR, "table")
-            if not tables:
-                print("No tables found")
-                return
+        # Get clipboard
+        content = pyperclip.paste()
+        logger.info(f"Got {len(content)} characters from clipboard")
+        return content
 
-            first_table = tables[0]  # Get only the first table
+    except Exception as e:
+        logger.error(f"Scraping failed: {e}")
+        return None
 
-            # Extract headers and rows from the first table
-            headers = [
-                th.text.strip() for th in first_table.find_elements(By.TAG_NAME, "th")
-            ]
+    finally:
+        driver.quit()
+        logger.info("Browser closed")
 
-            # Create data structure for the table
-            data = []
 
-            # Process rows
-            for row in first_table.find_elements(By.TAG_NAME, "tr")[
-                1:
-            ]:  # Skip header row
-                cells = [
-                    cell.text.strip() for cell in row.find_elements(By.TAG_NAME, "td")
-                ]
-                if len(cells) == len(headers):
-                    # Extract model name and version
-                    model_info = cells[0].split("\n")
-                    model_name = model_info[0] if model_info else ""
-                    model_version = model_info[1].strip() if len(model_info) > 1 else ""
+def main():
+    """Main entry point."""
+    logger.info("=" * 60)
+    logger.info("OpenAI Pricing Scraper")
+    logger.info("=" * 60)
 
-                    # Replace the first cell with separate model name and version
-                    cells[0] = model_name
+    # Scrape the page
+    markdown = scrape_pricing()
+    if not markdown:
+        logger.error("Failed to get pricing data")
+        sys.exit(1)
 
-                    # Create a row with model name, version, and pricing data
-                    row_data = {
-                        "Model": model_name,
-                        "Version": model_version,
-                    }
+    # Save raw markdown
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(RAW_MD_PATH, "w", encoding="utf-8") as f:
+        f.write(markdown)
+    logger.info(f"Saved raw markdown to {RAW_MD_PATH}")
 
-                    # Add pricing columns
-                    for i in range(1, len(headers)):
-                        row_data[headers[i]] = cells[i]
+    # Parse Text tokens Standard pricing
+    logger.info("\nParsing Text tokens Standard pricing...")
+    text_data = parse_markdown_table(markdown, "Text tokens", "Standard")
 
-                    data.append(row_data)
+    if not text_data:
+        logger.error("Failed to parse pricing data")
+        sys.exit(1)
 
-            # Create DataFrame and save to CSV
-            if data:
-                # Create data directory if it doesn't exist
-                data_dir = os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)), "data"
-                )
-                os.makedirs(data_dir, exist_ok=True)
+    # Save outputs
+    save_csv(text_data, PRICING_CSV_PATH)
+    save_python_dict(text_data, PRICING_PY_PATH)
 
-                # Save to CSV
-                df = pd.DataFrame(data)
-                df.to_csv(
-                    os.path.join(data_dir, "openai_text_tokens_pricing.csv"),
-                    index=False,
-                )
-                print("Text tokens pricing data saved successfully")
-            else:
-                print("No data found in the first table")
-
-            # Explicit cleanup
-            driver.close()
-            driver.service.stop()
-
-        except Exception as e:
-            print(f"Error: {str(e)}")
+    logger.info("\n" + "=" * 60)
+    logger.info("Done! Updated:")
+    logger.info(f"  - {PRICING_CSV_PATH}")
+    logger.info(f"  - {PRICING_PY_PATH}")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":
-    get_openai_pricing()
+    main()
